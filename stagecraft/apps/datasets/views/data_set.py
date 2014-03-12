@@ -10,12 +10,28 @@ from stagecraft.libs.validation.validation \
 logger = logging.getLogger(__name__)
 
 
-def detail(request, name):
-    if not _authorized(extract_bearer_token(request)):
-        error = {'status': 'error',
-                 'message': 'Forbidden: invalid or no token given.'}
-        return HttpResponseForbidden(to_json(error))
+def _authorized(given_token, correct_token):
+    if given_token == correct_token:
+        return True
 
+    logger.warn("Bad token. Got: '{}'".format(given_token))
+    return False
+
+
+def token_required(correct_token):
+    def decorator(a_view):
+        def _wrapped_view(request, *args, **kwargs):
+            if _authorized(extract_bearer_token(request), correct_token):
+                return a_view(request, *args, **kwargs)
+            error = {'status': 'error',
+                     'message': 'Forbidden: invalid or no token given.'}
+            return HttpResponseForbidden(to_json(error))
+        return _wrapped_view
+    return decorator
+
+
+@token_required(settings.STAGECRAFT_DATA_SET_QUERY_TOKEN)
+def detail(request, name):
     try:
         data_set = DataSet.objects.get(name=name)
     except DataSet.DoesNotExist:
@@ -29,12 +45,8 @@ def detail(request, name):
     return HttpResponse(json_str, content_type='application/json')
 
 
+@token_required(settings.STAGECRAFT_DATA_SET_QUERY_TOKEN)
 def list(request, data_group=None, data_type=None):
-    if not _authorized(extract_bearer_token(request)):
-        error = {'status': 'error',
-                 'message': 'Forbidden: invalid or no token given.'}
-        return HttpResponseForbidden(to_json(error))
-
     def get_filter_kwargs(key_map, query_params):
         """Return Django filter kwargs from query parameters"""
         return {key_map[k]: v for k, v in query_params if k in key_map}
@@ -66,11 +78,3 @@ def list(request, data_group=None, data_type=None):
 
 def to_json(what):
     return json.dumps(what, indent=1)
-
-
-def _authorized(token):
-    if token == settings.STAGECRAFT_DATA_SET_QUERY_TOKEN:
-        return True
-
-    logger.info("Bad token for create collection: '{}'".format(token))
-    return False
